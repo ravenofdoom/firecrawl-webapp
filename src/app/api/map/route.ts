@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
 
     const firecrawl = getFirecrawlClient();
 
-    const mapResult = await firecrawl.mapUrl(url, {
+    const mapResult = await firecrawl.map(url, {
       search,
       limit,
     });

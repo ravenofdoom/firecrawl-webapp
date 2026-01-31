@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     const firecrawl = getFirecrawlClient();
 
     // Start crawl job
-    const crawlResult = await firecrawl.crawlUrl(url, {
+    const crawlResult = await firecrawl.crawl(url, {
       limit,
       scrapeOptions: {
         formats: ["markdown"],

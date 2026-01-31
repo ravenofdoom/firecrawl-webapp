@@ -30,11 +30,14 @@ export async function POST(request: NextRequest) {
 
     const firecrawl = getFirecrawlClient();
 
-    const extractOptions: { prompt?: string; schema?: object } = {};
-    if (prompt) extractOptions.prompt = prompt;
+    const extractArgs: { urls: string[]; prompt?: string; schema?: object } = {
+      urls: Array.isArray(urls) ? urls : [urls],
+    };
+
+    if (prompt) extractArgs.prompt = prompt;
     if (schema) {
       try {
-        extractOptions.schema = typeof schema === "string" ? JSON.parse(schema) : schema;
+        extractArgs.schema = typeof schema === "string" ? JSON.parse(schema) : schema;
       } catch {
         return NextResponse.json(
           { error: "Invalid JSON schema" },
@@ -43,10 +46,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const extractResult = await firecrawl.extract(
-      Array.isArray(urls) ? urls : [urls],
-      extractOptions
-    );
+    const extractResult = await firecrawl.extract(extractArgs);
 
     return NextResponse.json({
       success: true,

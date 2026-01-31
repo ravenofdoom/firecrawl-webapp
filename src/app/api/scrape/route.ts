@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     }
 
     const firecrawl = getFirecrawlClient();
-    const result = await firecrawl.scrapeUrl(url, { formats });
+    const result = await firecrawl.scrape(url, { formats });
 
     return NextResponse.json({
       success: true,
