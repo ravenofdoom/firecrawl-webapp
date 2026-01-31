@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import {
   Card,
   CardContent,
@@ -39,6 +40,8 @@ interface ApiResult {
     html?: string;
     links?: string[];
     data?: Array<{ markdown?: string }>;
+    output?: string;
+    result?: unknown;
     [key: string]: unknown;
   };
   error?: string;
@@ -54,6 +57,8 @@ export default function DashboardPage() {
   const [result, setResult] = useState<ApiResult | null>(null);
   const [activeTab, setActiveTab] = useState<ToolType>("agent");
   const [viewMode, setViewMode] = useState<"formatted" | "raw">("formatted");
+  const [progress, setProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState("");
 
   // Scrape form
   const [scrapeUrl, setScrapeUrl] = useState("");
@@ -72,6 +77,25 @@ export default function DashboardPage() {
   const [agentPrompt, setAgentPrompt] = useState("");
   const [agentUrls, setAgentUrls] = useState("");
 
+  // Progress animation
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (loading) {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress((prev) => {
+          if (prev >= 90) return prev;
+          return prev + Math.random() * 10;
+        });
+      }, 500);
+    } else {
+      setProgress(100);
+      const timeout = setTimeout(() => setProgress(0), 500);
+      return () => clearTimeout(timeout);
+    }
+    return () => clearInterval(interval);
+  }, [loading]);
+
   // Redirect if not authenticated
   if (status === "loading") {
     return (
@@ -86,9 +110,39 @@ export default function DashboardPage() {
     return null;
   }
 
+  const getLoadingMessages = (tool: ToolType): string[] => {
+    switch (tool) {
+      case "agent":
+        return [
+          "Agent startet...",
+          "Durchsuche das Web...",
+          "Analysiere Inhalte...",
+          "Extrahiere Informationen...",
+          "Verarbeite Ergebnisse...",
+        ];
+      case "scrape":
+        return ["Lade Seite...", "Extrahiere Inhalte...", "Formatiere Daten..."];
+      case "crawl":
+        return ["Starte Crawl...", "Folge Links...", "Sammle Seiten...", "Verarbeite Inhalte..."];
+      case "map":
+        return ["Analysiere Domain...", "Sammle URLs...", "Erstelle Sitemap..."];
+      default:
+        return ["Verarbeite..."];
+    }
+  };
+
   const handleSubmit = async (tool: ToolType) => {
     setLoading(true);
     setResult(null);
+
+    const messages = getLoadingMessages(tool);
+    let messageIndex = 0;
+    setLoadingMessage(messages[0]);
+
+    const messageInterval = setInterval(() => {
+      messageIndex = (messageIndex + 1) % messages.length;
+      setLoadingMessage(messages[messageIndex]);
+    }, 2000);
 
     try {
       let body: Record<string, unknown> = {};
@@ -125,35 +179,68 @@ export default function DashboardPage() {
         error: error instanceof Error ? error.message : "Request failed",
       });
     } finally {
+      clearInterval(messageInterval);
       setLoading(false);
+      setLoadingMessage("");
     }
   };
 
   const exportToPdf = async () => {
     if (!resultRef.current) return;
 
-    const { default: html2canvas } = await import("html2canvas");
-    const { default: jsPDF } = await import("jspdf");
+    try {
+      const html2canvas = (await import("html2canvas")).default;
+      const jsPDF = (await import("jspdf")).default;
 
-    const canvas = await html2canvas(resultRef.current, {
-      backgroundColor: "#1e293b",
-      scale: 2,
-    });
+      const element = resultRef.current;
 
-    const imgData = canvas.toDataURL("image/png");
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "px",
-      format: [canvas.width, canvas.height],
-    });
+      const canvas = await html2canvas(element, {
+        backgroundColor: "#0f172a",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
 
-    pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height);
-    pdf.save(`firecrawl-result-${Date.now()}.pdf`);
+      const imgData = canvas.toDataURL("image/png");
+
+      const pdfWidth = 210; // A4 width in mm
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      const pdf = new jsPDF({
+        orientation: pdfHeight > pdfWidth ? "portrait" : "landscape",
+        unit: "mm",
+        format: "a4",
+      });
+
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      let heightLeft = pdfHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - pdfHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, pdfWidth, pdfHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`firecrawl-result-${Date.now()}.pdf`);
+    } catch (error) {
+      console.error("PDF export error:", error);
+      alert("PDF Export fehlgeschlagen. Bitte versuche es erneut.");
+    }
   };
 
-  // Extract markdown content from result
-  const getMarkdownContent = (): string => {
+  // Extract content from result for display
+  const getDisplayContent = (): string => {
     if (!result?.data) return "";
+
+    // Agent output
+    if (result.data.output) {
+      return result.data.output;
+    }
 
     // Direct markdown
     if (result.data.markdown) {
@@ -167,17 +254,55 @@ export default function DashboardPage() {
         .join("\n\n---\n\n");
     }
 
-    // Links from map
+    // Links from map (as array of strings)
     if (Array.isArray(result.data.links)) {
-      return result.data.links.map((link) => `- ${link}`).join("\n");
+      return "## Gefundene URLs\n\n" + result.data.links.map((link) => `- ${link}`).join("\n");
+    }
+
+    // Map result with links array containing objects
+    if (result.data.links && Array.isArray(result.data.links)) {
+      return "## Gefundene URLs\n\n" + result.data.links
+        .map((link: string | { url?: string }) =>
+          typeof link === 'string' ? `- ${link}` : `- ${link.url || JSON.stringify(link)}`
+        )
+        .join("\n");
     }
 
     // Agent/Extract results or other structured data
     if (typeof result.data === "object") {
-      return "```json\n" + JSON.stringify(result.data, null, 2) + "\n```";
+      // Try to format nicely
+      const formatted = JSON.stringify(result.data, null, 2);
+      return "```json\n" + formatted + "\n```";
     }
 
     return String(result.data);
+  };
+
+  const toolDescriptions = {
+    agent: {
+      color: "blue",
+      icon: "🤖",
+      title: "Agent",
+      description: "Der Agent sucht autonom im Web nach Informationen. Beschreibe einfach, was du wissen möchtest - URLs sind optional.",
+    },
+    scrape: {
+      color: "green",
+      icon: "📄",
+      title: "Scrape",
+      description: "Extrahiert den kompletten Inhalt einer einzelnen Webseite als Markdown, HTML oder Liste aller Links.",
+    },
+    crawl: {
+      color: "orange",
+      icon: "🕷️",
+      title: "Crawl",
+      description: "Durchsucht eine Website rekursiv und sammelt Inhalte von mehreren Unterseiten bis zum angegebenen Limit.",
+    },
+    map: {
+      color: "purple",
+      icon: "🗺️",
+      title: "Map",
+      description: "Erstellt schnell eine Übersicht aller URLs einer Website ohne die Inhalte zu extrahieren. Ideal zur Planung.",
+    },
   };
 
   return (
@@ -226,6 +351,13 @@ export default function DashboardPage() {
         </div>
       </header>
 
+      {/* Progress Bar */}
+      {loading && (
+        <div className="fixed top-[65px] left-0 right-0 z-20">
+          <Progress value={progress} className="h-1 rounded-none" />
+        </div>
+      )}
+
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 lg:px-8 py-8">
         <div className="grid lg:grid-cols-2 gap-8">
@@ -234,23 +366,23 @@ export default function DashboardPage() {
             <CardHeader>
               <CardTitle className="text-white">Web Scraping Tools</CardTitle>
               <CardDescription className="text-slate-400">
-                Select a tool and configure your request
+                Wähle ein Tool und konfiguriere deine Anfrage
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ToolType)}>
                 <TabsList className="grid grid-cols-4 mb-6 bg-slate-700">
                   <TabsTrigger value="agent" className="data-[state=active]:bg-blue-600">Agent</TabsTrigger>
-                  <TabsTrigger value="scrape" className="data-[state=active]:bg-slate-600">Scrape</TabsTrigger>
-                  <TabsTrigger value="crawl" className="data-[state=active]:bg-slate-600">Crawl</TabsTrigger>
-                  <TabsTrigger value="map" className="data-[state=active]:bg-slate-600">Map</TabsTrigger>
+                  <TabsTrigger value="scrape" className="data-[state=active]:bg-green-600">Scrape</TabsTrigger>
+                  <TabsTrigger value="crawl" className="data-[state=active]:bg-orange-600">Crawl</TabsTrigger>
+                  <TabsTrigger value="map" className="data-[state=active]:bg-purple-600">Map</TabsTrigger>
                 </TabsList>
 
                 {/* Agent Tab */}
                 <TabsContent value="agent" className="space-y-4">
-                  <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3 mb-4">
+                  <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3">
                     <p className="text-blue-300 text-sm">
-                      Der Agent sucht autonom im Web nach Informationen. Beschreibe einfach, was du wissen möchtest.
+                      {toolDescriptions.agent.icon} {toolDescriptions.agent.description}
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -278,21 +410,23 @@ export default function DashboardPage() {
                       rows={2}
                       className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
                     />
-                    <p className="text-slate-500 text-xs">
-                      Ohne URLs sucht der Agent selbstständig im Web
-                    </p>
                   </div>
                   <Button
                     onClick={() => handleSubmit("agent")}
                     disabled={loading || !agentPrompt}
                     className="w-full bg-blue-600 hover:bg-blue-700"
                   >
-                    {loading && activeTab === "agent" ? "Agent arbeitet..." : "Agent starten"}
+                    {loading && activeTab === "agent" ? loadingMessage || "Agent arbeitet..." : "Agent starten"}
                   </Button>
                 </TabsContent>
 
                 {/* Scrape Tab */}
                 <TabsContent value="scrape" className="space-y-4">
+                  <div className="bg-green-900/20 border border-green-700/50 rounded-lg p-3">
+                    <p className="text-green-300 text-sm">
+                      {toolDescriptions.scrape.icon} {toolDescriptions.scrape.description}
+                    </p>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="scrape-url" className="text-white">URL</Label>
                     <Input
@@ -319,14 +453,19 @@ export default function DashboardPage() {
                   <Button
                     onClick={() => handleSubmit("scrape")}
                     disabled={loading || !scrapeUrl}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="w-full bg-green-600 hover:bg-green-700"
                   >
-                    {loading && activeTab === "scrape" ? "Scraping..." : "Scrape URL"}
+                    {loading && activeTab === "scrape" ? loadingMessage || "Scraping..." : "Scrape URL"}
                   </Button>
                 </TabsContent>
 
                 {/* Crawl Tab */}
                 <TabsContent value="crawl" className="space-y-4">
+                  <div className="bg-orange-900/20 border border-orange-700/50 rounded-lg p-3">
+                    <p className="text-orange-300 text-sm">
+                      {toolDescriptions.crawl.icon} {toolDescriptions.crawl.description}
+                    </p>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="crawl-url" className="text-white">Start URL</Label>
                     <Input
@@ -338,7 +477,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="crawl-limit" className="text-white">Page Limit</Label>
+                    <Label htmlFor="crawl-limit" className="text-white">Seiten-Limit</Label>
                     <Input
                       id="crawl-limit"
                       type="number"
@@ -352,14 +491,19 @@ export default function DashboardPage() {
                   <Button
                     onClick={() => handleSubmit("crawl")}
                     disabled={loading || !crawlUrl}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="w-full bg-orange-600 hover:bg-orange-700"
                   >
-                    {loading && activeTab === "crawl" ? "Crawling..." : "Start Crawl"}
+                    {loading && activeTab === "crawl" ? loadingMessage || "Crawling..." : "Start Crawl"}
                   </Button>
                 </TabsContent>
 
                 {/* Map Tab */}
                 <TabsContent value="map" className="space-y-4">
+                  <div className="bg-purple-900/20 border border-purple-700/50 rounded-lg p-3">
+                    <p className="text-purple-300 text-sm">
+                      {toolDescriptions.map.icon} {toolDescriptions.map.description}
+                    </p>
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="map-url" className="text-white">Domain URL</Label>
                     <Input
@@ -371,7 +515,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="map-search" className="text-white">Search Filter (optional)</Label>
+                    <Label htmlFor="map-search" className="text-white">Suchfilter (optional)</Label>
                     <Input
                       id="map-search"
                       placeholder="blog, docs, api..."
@@ -395,9 +539,9 @@ export default function DashboardPage() {
                   <Button
                     onClick={() => handleSubmit("map")}
                     disabled={loading || !mapUrl}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    className="w-full bg-purple-600 hover:bg-purple-700"
                   >
-                    {loading && activeTab === "map" ? "Mapping..." : "Map URLs"}
+                    {loading && activeTab === "map" ? loadingMessage || "Mapping..." : "Map URLs"}
                   </Button>
                 </TabsContent>
               </Tabs>
@@ -407,9 +551,9 @@ export default function DashboardPage() {
           {/* Results Panel */}
           <Card className="bg-slate-800/50 border-slate-700">
             <CardHeader>
-              <div className="flex justify-between items-center">
-                <CardTitle className="text-white">Results</CardTitle>
-                <div className="flex items-center gap-2">
+              <div className="flex justify-between items-center flex-wrap gap-2">
+                <CardTitle className="text-white">Ergebnisse</CardTitle>
+                <div className="flex items-center gap-2 flex-wrap">
                   {result?.success && (
                     <>
                       <Select value={viewMode} onValueChange={(v) => setViewMode(v as "formatted" | "raw")}>
@@ -417,7 +561,7 @@ export default function DashboardPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent className="bg-slate-700 border-slate-600">
-                          <SelectItem value="formatted">Formatted</SelectItem>
+                          <SelectItem value="formatted">Formatiert</SelectItem>
                           <SelectItem value="raw">Raw JSON</SelectItem>
                         </SelectContent>
                       </Select>
@@ -427,26 +571,33 @@ export default function DashboardPage() {
                         onClick={exportToPdf}
                         className="border-slate-600 text-white hover:bg-slate-700"
                       >
-                        Export PDF
+                        PDF Export
                       </Button>
                     </>
                   )}
                   {result && (
                     <Badge variant={result.success ? "default" : "destructive"}>
-                      {result.success ? "Success" : "Error"}
+                      {result.success ? "Erfolg" : "Fehler"}
                     </Badge>
                   )}
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {!result ? (
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+                  <p className="text-slate-400 text-center">{loadingMessage}</p>
+                  <p className="text-slate-500 text-sm">Dies kann einige Sekunden dauern...</p>
+                </div>
+              ) : !result ? (
                 <p className="text-slate-400 text-center py-8">
-                  Run a tool to see results here
+                  Wähle ein Tool und starte eine Anfrage um Ergebnisse zu sehen
                 </p>
               ) : result.error ? (
                 <div className="bg-red-900/30 border border-red-700 rounded-lg p-4">
-                  <p className="text-red-300">{result.error}</p>
+                  <p className="text-red-300 font-medium mb-2">Fehler</p>
+                  <p className="text-red-200 text-sm">{result.error}</p>
                 </div>
               ) : (
                 <div
@@ -454,8 +605,8 @@ export default function DashboardPage() {
                   className="bg-slate-900 rounded-lg p-6 max-h-[600px] overflow-auto"
                 >
                   {viewMode === "formatted" ? (
-                    <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-p:text-slate-300 prose-a:text-blue-400 prose-strong:text-white prose-code:text-green-400 prose-pre:bg-slate-800">
-                      <ReactMarkdown>{getMarkdownContent()}</ReactMarkdown>
+                    <div className="prose prose-invert prose-sm max-w-none prose-headings:text-white prose-p:text-slate-300 prose-li:text-slate-300 prose-a:text-blue-400 prose-strong:text-white prose-code:text-green-400 prose-pre:bg-slate-800 prose-pre:text-slate-300">
+                      <ReactMarkdown>{getDisplayContent()}</ReactMarkdown>
                     </div>
                   ) : (
                     <pre className="text-sm text-slate-300 whitespace-pre-wrap break-words font-mono">
