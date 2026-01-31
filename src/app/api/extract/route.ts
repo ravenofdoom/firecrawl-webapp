@@ -30,7 +30,11 @@ export async function POST(request: NextRequest) {
 
     const firecrawl = getFirecrawlClient();
 
-    const extractArgs: { urls: string[]; prompt?: string; schema?: object } = {
+    const extractArgs: {
+      urls: string[];
+      prompt?: string;
+      schema?: Record<string, unknown>;
+    } = {
       urls: Array.isArray(urls) ? urls : [urls],
     };
 
