@@ -78,3 +78,19 @@ export function isEnvUser(username: string): boolean {
   const envUsers = getEnvUsers();
   return envUsers.has(username);
 }
+
+// Change password for in-memory users only
+export function changePassword(username: string, newPassword: string): boolean {
+  // Can only change password for in-memory users
+  if (additionalUsers.has(username)) {
+    const userData = additionalUsers.get(username)!;
+    additionalUsers.set(username, {
+      ...userData,
+      password: newPassword,
+    });
+    return true;
+  }
+
+  // ENV users cannot have their password changed via API
+  return false;
+}

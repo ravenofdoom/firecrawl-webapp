@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type ToolType = "scrape" | "crawl" | "map" | "extract";
+type ToolType = "scrape" | "crawl" | "map" | "agent";
 
 interface ApiResult {
   success: boolean;
@@ -52,7 +52,7 @@ export default function DashboardPage() {
   // Form states
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ApiResult | null>(null);
-  const [activeTab, setActiveTab] = useState<ToolType>("scrape");
+  const [activeTab, setActiveTab] = useState<ToolType>("agent");
   const [viewMode, setViewMode] = useState<"formatted" | "raw">("formatted");
 
   // Scrape form
@@ -68,9 +68,9 @@ export default function DashboardPage() {
   const [mapSearch, setMapSearch] = useState("");
   const [mapLimit, setMapLimit] = useState("100");
 
-  // Extract form
-  const [extractUrls, setExtractUrls] = useState("");
-  const [extractPrompt, setExtractPrompt] = useState("");
+  // Agent form
+  const [agentPrompt, setAgentPrompt] = useState("");
+  const [agentUrls, setAgentUrls] = useState("");
 
   // Redirect if not authenticated
   if (status === "loading") {
@@ -103,10 +103,10 @@ export default function DashboardPage() {
         case "map":
           body = { url: mapUrl, search: mapSearch || undefined, limit: parseInt(mapLimit) };
           break;
-        case "extract":
+        case "agent":
           body = {
-            urls: extractUrls.split("\n").filter((u) => u.trim()),
-            prompt: extractPrompt,
+            prompt: agentPrompt,
+            urls: agentUrls ? agentUrls.split("\n").filter((u) => u.trim()) : undefined,
           };
           break;
       }
@@ -172,7 +172,7 @@ export default function DashboardPage() {
       return result.data.links.map((link) => `- ${link}`).join("\n");
     }
 
-    // Extract results or other structured data
+    // Agent/Extract results or other structured data
     if (typeof result.data === "object") {
       return "```json\n" + JSON.stringify(result.data, null, 2) + "\n```";
     }
@@ -186,16 +186,32 @@ export default function DashboardPage() {
       <header className="border-b border-slate-700 bg-slate-900/50 backdrop-blur sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-xl font-bold text-white">Firecrawl</h1>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             <Button
               variant="ghost"
               size="sm"
-              className="text-slate-300 hover:text-white"
+              className="text-slate-300 hover:text-white text-xs md:text-sm"
+              onClick={() => router.push("/docs/de")}
+            >
+              Hilfe (DE)
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-slate-300 hover:text-white text-xs md:text-sm"
+              onClick={() => router.push("/docs/en")}
+            >
+              Help (EN)
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-slate-300 hover:text-white text-xs md:text-sm"
               onClick={() => router.push("/settings")}
             >
               Settings
             </Button>
-            <span className="text-slate-400 text-sm">
+            <span className="text-slate-400 text-sm hidden md:inline">
               {session?.user?.name}
             </span>
             <Button
@@ -224,11 +240,56 @@ export default function DashboardPage() {
             <CardContent>
               <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ToolType)}>
                 <TabsList className="grid grid-cols-4 mb-6 bg-slate-700">
+                  <TabsTrigger value="agent" className="data-[state=active]:bg-blue-600">Agent</TabsTrigger>
                   <TabsTrigger value="scrape" className="data-[state=active]:bg-slate-600">Scrape</TabsTrigger>
                   <TabsTrigger value="crawl" className="data-[state=active]:bg-slate-600">Crawl</TabsTrigger>
                   <TabsTrigger value="map" className="data-[state=active]:bg-slate-600">Map</TabsTrigger>
-                  <TabsTrigger value="extract" className="data-[state=active]:bg-slate-600">Extract</TabsTrigger>
                 </TabsList>
+
+                {/* Agent Tab */}
+                <TabsContent value="agent" className="space-y-4">
+                  <div className="bg-blue-900/20 border border-blue-700/50 rounded-lg p-3 mb-4">
+                    <p className="text-blue-300 text-sm">
+                      Der Agent sucht autonom im Web nach Informationen. Beschreibe einfach, was du wissen möchtest.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="agent-prompt" className="text-white">
+                      Was möchtest du herausfinden?
+                    </Label>
+                    <Textarea
+                      id="agent-prompt"
+                      placeholder="z.B. Welche PIM-Software nutzt der Böttcher Online Shop? Oder: Finde alle Kontaktdaten von Tech-Startups in Berlin..."
+                      value={agentPrompt}
+                      onChange={(e) => setAgentPrompt(e.target.value)}
+                      rows={4}
+                      className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="agent-urls" className="text-white">
+                      URLs (optional - eine pro Zeile)
+                    </Label>
+                    <Textarea
+                      id="agent-urls"
+                      placeholder="https://example.com&#10;Leer lassen, wenn der Agent selbst suchen soll"
+                      value={agentUrls}
+                      onChange={(e) => setAgentUrls(e.target.value)}
+                      rows={2}
+                      className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                    />
+                    <p className="text-slate-500 text-xs">
+                      Ohne URLs sucht der Agent selbstständig im Web
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => handleSubmit("agent")}
+                    disabled={loading || !agentPrompt}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    {loading && activeTab === "agent" ? "Agent arbeitet..." : "Agent starten"}
+                  </Button>
+                </TabsContent>
 
                 {/* Scrape Tab */}
                 <TabsContent value="scrape" className="space-y-4">
@@ -337,41 +398,6 @@ export default function DashboardPage() {
                     className="w-full bg-blue-600 hover:bg-blue-700"
                   >
                     {loading && activeTab === "map" ? "Mapping..." : "Map URLs"}
-                  </Button>
-                </TabsContent>
-
-                {/* Extract Tab */}
-                <TabsContent value="extract" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="extract-urls" className="text-white">URLs (one per line)</Label>
-                    <Textarea
-                      id="extract-urls"
-                      placeholder="https://example.com/page1&#10;https://example.com/page2"
-                      value={extractUrls}
-                      onChange={(e) => setExtractUrls(e.target.value)}
-                      rows={3}
-                      className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="extract-prompt" className="text-white">
-                      What do you want to find out?
-                    </Label>
-                    <Textarea
-                      id="extract-prompt"
-                      placeholder="e.g., Welche PIM nutzt dieser Online Shop? or Extract all product names and prices..."
-                      value={extractPrompt}
-                      onChange={(e) => setExtractPrompt(e.target.value)}
-                      rows={3}
-                      className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
-                    />
-                  </div>
-                  <Button
-                    onClick={() => handleSubmit("extract")}
-                    disabled={loading || !extractUrls || !extractPrompt}
-                    className="w-full bg-blue-600 hover:bg-blue-700"
-                  >
-                    {loading && activeTab === "extract" ? "Extracting..." : "Extract Data"}
                   </Button>
                 </TabsContent>
               </Tabs>
