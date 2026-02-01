@@ -254,16 +254,11 @@ export default function DashboardPage() {
         .join("\n\n---\n\n");
     }
 
-    // Links from map (as array of strings)
+    // Links from map (can be strings or objects with url property)
     if (Array.isArray(result.data.links)) {
-      return "## Gefundene URLs\n\n" + result.data.links.map((link) => `- ${link}`).join("\n");
-    }
-
-    // Map result with links array containing objects
-    if (result.data.links && Array.isArray(result.data.links)) {
       return "## Gefundene URLs\n\n" + result.data.links
         .map((link: string | { url?: string }) =>
-          typeof link === 'string' ? `- ${link}` : `- ${link.url || JSON.stringify(link)}`
+          typeof link === 'string' ? `- ${link}` : `- ${(link as { url?: string }).url || JSON.stringify(link)}`
         )
         .join("\n");
     }
