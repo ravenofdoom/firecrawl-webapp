@@ -237,9 +237,27 @@ export default function DashboardPage() {
   const getDisplayContent = (): string => {
     if (!result?.data) return "";
 
-    // Agent output
+    // Agent output - handle various formats
     if (result.data.output) {
-      return result.data.output;
+      // If output is a string, return it directly
+      if (typeof result.data.output === 'string') {
+        return result.data.output;
+      }
+      // If output is an object, try to extract meaningful content
+      if (typeof result.data.output === 'object') {
+        const output = result.data.output as Record<string, unknown>;
+        // Check for common content fields
+        if (output.markdown) return String(output.markdown);
+        if (output.content) return String(output.content);
+        if (output.text) return String(output.text);
+        if (output.result) return typeof output.result === 'string' ? output.result : JSON.stringify(output.result, null, 2);
+        // If it has data, try to format it nicely
+        if (output.data) {
+          return "```json\n" + JSON.stringify(output.data, null, 2) + "\n```";
+        }
+        // Return the whole object as JSON
+        return "```json\n" + JSON.stringify(output, null, 2) + "\n```";
+      }
     }
 
     // Direct markdown
