@@ -60,8 +60,8 @@ export async function POST(request: NextRequest) {
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`[Agent] Completed in ${duration}s. Result:`, JSON.stringify(agentResult, null, 2));
 
-    // Handle different response structures
-    const result = agentResult as Record<string, unknown>;
+    // Handle different response structures - cast through unknown first
+    const result = agentResult as unknown as Record<string, unknown>;
 
     // Extract the output/data from various possible locations
     let output = result.output || result.data || result.result || result.markdown || result.content;
